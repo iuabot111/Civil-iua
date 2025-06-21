@@ -1,73 +1,89 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from flask import Flask, request
 import os
+from fastapi import FastAPI, Request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, ContextTypes
+)
+from telegram.ext import Defaults
+import asyncio
 
-# متغيرات البيئة
-TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+# إعداد التوكن وتهيئة التطبيق
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # مثال: https://yourapp.up.railway.app
 
-# بيانات المواد لكل فصل
-semester_data = {
-    "السابع": [
-        "اقتصاد هندسي", "تصميم خرسانة 2", "تصميم فولاذ 1", "حساب كميات", "فكر إسلامي",
-        "ميكانيكا تربة 2", "هندسة طرق 1", "هيدروليكا 1", "واقع إسلامي"
-    ],
-    "الثامن": [
-        "إدارة تشييد", "تصميم خرسانة 3", "تصميم فولاذ 2", "دراسات قرآنية",
-        "هندسة بيئية", "هندسة طرق 2", "هيدروليكا 2"
-    ]
+# مجلدات الفصول الدراسية
+semesters_paths = {
+    "السابع": "semester7",
+    "الثامن": "semester8"
 }
 
-# بدء البوت - الأمر /start
+# إعداد FastAPI
+app = FastAPI()
+
+# إعداد البوت
+tg_app = Application.builder().token(TOKEN).defaults(Defaults(parse_mode="HTML")).build()
+
+# أمر /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("📚 الفصل السابع", callback_data='السابع')],
-        [InlineKeyboardButton("📘 الفصل الثامن", callback_data='الثامن')]
+        [InlineKeyboardButton("📚 الفصل السابع", callback_data="السابع")],
+        [InlineKeyboardButton("📘 الفصل الثامن", callback_data="الثامن")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("📖 اختر الفصل الدراسي:", reply_markup=reply_markup)
+    await update.message.reply_text("📖 اختر الفصل الدراسي:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# عند الضغط على الأزرار
+# التعامل مع الأزرار
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
 
-    if data in semester_data:
-        buttons = [[InlineKeyboardButton(subject, callback_data="none")] for subject in semester_data[data]]
-        markup = InlineKeyboardMarkup(buttons)
-        await query.edit_message_text(f"📘 مواد الفصل {data}:", reply_markup=markup)
-    else:
-        await query.edit_message_text("📌 سيتم إضافة المحتوى لاحقًا.")
+    if data in semesters_paths:
+        folder_path = semesters_paths[data]
+        if os.path.exists(folder_path):
+            subjects = os.listdir(folder_path)
+            buttons = [[InlineKeyboardButton(sub, callback_data=f"{data}|{sub}")] for sub in subjects]
+            await query.edit_message_text(f"📘 مواد الفصل {data}:", reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.edit_message_text("❌ لم يتم العثور على مجلد الفصل الدراسي.")
 
-# إعداد التطبيق باستخدام Flask
-app = Flask(__name__)
-from telegram.ext import Application
-telegram_app = ApplicationBuilder().token(TOKEN).build()
+    elif "|" in data:
+        semester, subject = data.split("|")
+        folder_path = os.path.join(semesters_paths[semester], subject)
 
-# إضافة الأوامر
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CallbackQueryHandler(button_handler))
+        if os.path.exists(folder_path):
+            files = os.listdir(folder_path)
+            if not files:
+                await query.edit_message_text(f"📂 لا توجد ملفات للمادة {subject}.")
+                return
 
-# مسار Webhook
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    telegram_app.update_queue.put_nowait(update)
-    return "ok"
+            await query.edit_message_text(f"📤 يتم إرسال ملفات مادة {subject} الآن...")
 
-# الصفحة الرئيسية
-@app.route("/")
-def home():
-    return "✅ البوت يعمل الآن باستخدام Webhook!"
+            for filename in files:
+                file_path = os.path.join(folder_path, filename)
+                try:
+                    with open(file_path, "rb") as file:
+                        await context.bot.send_document(chat_id=query.message.chat_id, document=InputFile(file), caption=filename)
+                except Exception as e:
+                    print(f"❌ فشل إرسال {filename}: {e}")
+                    await context.bot.send_message(chat_id=query.message.chat_id, text=f"⚠️ تعذر إرسال الملف: {filename}")
+        else:
+            await query.edit_message_text("❌ لم يتم العثور على مجلد المادة.")
 
-# تعيين Webhook عند أول تشغيل
-@app.before_first_request
-def set_webhook():
-    telegram_app.bot.set_webhook(url=WEBHOOK_URL)
+# تسجيل المعالجات
+tg_app.add_handler(CommandHandler("start", start))
+tg_app.add_handler(CallbackQueryHandler(button_handler))
 
-# تشغيل التطبيق
-if __name__ == "__main__":
-  app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+# نقطة استقبال Webhook من Telegram
+@app.post(f"/{TOKEN}")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, tg_app.bot)
+    await tg_app.update_queue.put(update)
+    return "OK"
+
+# إعداد Webhook عند التشغيل
+@app.on_event("startup")
+async def on_startup():
+    await tg_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    asyncio.create_task(tg_app.initialize())  # بدء البوت
 
