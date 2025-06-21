@@ -1,37 +1,34 @@
-import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes
-)
 from fastapi import FastAPI, Request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 import uvicorn
+import asyncio
 
-# إعداد التوكن من متغيرات البيئة
 TOKEN = "7336468743:AAEscQiBQMaY9pvgKt9SVKP1B-EoDrfZD6k"
-WEBHOOK_PATH = f"/{TOKEN}"
+WEBHOOK_PATH = "/webhook"  # ✅ مسار ثابت وسهل
 WEBHOOK_URL = f"https://civil-iua-production.up.railway.app{WEBHOOK_PATH}"
 
-# مواد مع وصف مختصر
+app = FastAPI()
+bot_app = ApplicationBuilder().token(TOKEN).build()
+
+# بيانات المواد
 subject_info = {
-    "اقتصاد هندسي": "شرح اقتصاد هندسي 📘...",
-    "تصميم خرسانة 2": "شرح تصميم خرسانة 2 🧱...",
-    "تصميم فولاذ 1": "شرح تصميم فولاذ 1 🔩...",
-    "حساب كميات": "شرح حساب كميات 📏...",
-    "فكر إسلامي": "شرح فكر إسلامي 🕌...",
-    "ميكانيكا تربة 2": "شرح ميكانيكا تربة 2 🧪...",
-    "هندسة طرق 1": "شرح هندسة طرق 1 🛣️...",
-    "هيدروليكا 1": "شرح هيدروليكا 1 💧...",
-    "واقع إسلامي": "شرح واقع إسلامي 🌍...",
-    "إدارة تشييد": "شرح إدارة تشييد 🏗️...",
-    "تصميم خرسانة 3": "شرح تصميم خرسانة 3 🧱...",
-    "تصميم فولاذ 2": "شرح تصميم فولاذ 2 🔧...",
-    "دراسات قرآنية": "شرح دراسات قرآنية 📖...",
-    "هندسة بيئية": "شرح هندسة بيئية 🌱...",
-    "هندسة طرق 2": "شرح هندسة طرق 2 🛤️...",
-    "هيدروليكا 2": "شرح هيدروليكا 2 🚰...",
+    "اقتصاد هندسي": "شرح اقتصاد هندسي...",
+    "تصميم خرسانة 2": "شرح تصميم خرسانة 2...",
+    "تصميم فولاذ 1": "شرح تصميم فولاذ 1...",
+    "حساب كميات": "شرح حساب كميات...",
+    "فكر إسلامي": "شرح فكر إسلامي...",
+    "ميكانيكا تربة 2": "شرح ميكانيكا تربة 2...",
+    "هندسة طرق 1": "شرح هندسة طرق 1...",
+    "هيدروليكا 1": "شرح هيدروليكا 1...",
+    "واقع إسلامي": "شرح واقع إسلامي...",
+    "إدارة تشييد": "شرح إدارة تشييد...",
+    "تصميم خرسانة 3": "شرح تصميم خرسانة 3...",
+    "تصميم فولاذ 2": "شرح تصميم فولاذ 2...",
+    "دراسات قرآنية": "شرح دراسات قرآنية...",
+    "هندسة بيئية": "شرح هندسة بيئية...",
+    "هندسة طرق 2": "شرح هندسة طرق 2...",
+    "هيدروليكا 2": "شرح هيدروليكا 2...",
 }
 
 semesters = {
@@ -43,7 +40,6 @@ semesters = {
         "هندسة بيئية", "هندسة طرق 2", "هيدروليكا 2"]],
 }
 
-# الوظائف الأساسية
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📚 الفصل السابع", callback_data="السابع")],
@@ -64,23 +60,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text("❌ لا توجد بيانات متاحة.")
 
-# إنشاء البوت وتطبيق FastAPI
-app = FastAPI()
-bot_app = ApplicationBuilder().token(TOKEN).build()
-
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(button_handler))
-
-@app.post(WEBHOOK_PATH)
-async def telegram_webhook(req: Request):
-    data = await req.json()
-    await bot_app.update_queue.put(Update.de_json(data, bot_app.bot))
-    return {"ok": True}
 
 @app.on_event("startup")
 async def on_startup():
     await bot_app.bot.set_webhook(WEBHOOK_URL)
-    print("✅ Webhook set!")
+    print("✅ Webhook تم تعيينه بنجاح!")
+
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, bot_app.bot)
+    await bot_app.update_queue.put(update)
+    return {"ok": True}
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
