@@ -1,29 +1,49 @@
 import os
-from fastapi import FastAPI, Request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, ContextTypes
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes
 )
-from telegram.ext import Defaults
-import asyncio
+from fastapi import FastAPI, Request
+import uvicorn
 
-# إعداد التوكن وتهيئة التطبيق
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # مثال: https://yourapp.up.railway.app
+# إعداد التوكن من متغيرات البيئة
+TOKEN = "7336468743:AAEscQiBQMaY9pvgKt9SVKP1B-EoDrfZD6k"
+WEBHOOK_PATH = f"/{TOKEN}"
+WEBHOOK_URL = f"https://civil-iua-production.up.railway.app{WEBHOOK_PATH}"
 
-# مجلدات الفصول الدراسية
-semesters_paths = {
-    "السابع": "semester7",
-    "الثامن": "semester8"
+# مواد مع وصف مختصر
+subject_info = {
+    "اقتصاد هندسي": "شرح اقتصاد هندسي 📘...",
+    "تصميم خرسانة 2": "شرح تصميم خرسانة 2 🧱...",
+    "تصميم فولاذ 1": "شرح تصميم فولاذ 1 🔩...",
+    "حساب كميات": "شرح حساب كميات 📏...",
+    "فكر إسلامي": "شرح فكر إسلامي 🕌...",
+    "ميكانيكا تربة 2": "شرح ميكانيكا تربة 2 🧪...",
+    "هندسة طرق 1": "شرح هندسة طرق 1 🛣️...",
+    "هيدروليكا 1": "شرح هيدروليكا 1 💧...",
+    "واقع إسلامي": "شرح واقع إسلامي 🌍...",
+    "إدارة تشييد": "شرح إدارة تشييد 🏗️...",
+    "تصميم خرسانة 3": "شرح تصميم خرسانة 3 🧱...",
+    "تصميم فولاذ 2": "شرح تصميم فولاذ 2 🔧...",
+    "دراسات قرآنية": "شرح دراسات قرآنية 📖...",
+    "هندسة بيئية": "شرح هندسة بيئية 🌱...",
+    "هندسة طرق 2": "شرح هندسة طرق 2 🛤️...",
+    "هيدروليكا 2": "شرح هيدروليكا 2 🚰...",
 }
 
-# إعداد FastAPI
-app = FastAPI()
+semesters = {
+    "السابع": [k for k in subject_info if k in [
+        "اقتصاد هندسي", "تصميم خرسانة 2", "تصميم فولاذ 1", "حساب كميات",
+        "فكر إسلامي", "ميكانيكا تربة 2", "هندسة طرق 1", "هيدروليكا 1", "واقع إسلامي"]],
+    "الثامن": [k for k in subject_info if k in [
+        "إدارة تشييد", "تصميم خرسانة 3", "تصميم فولاذ 2", "دراسات قرآنية",
+        "هندسة بيئية", "هندسة طرق 2", "هيدروليكا 2"]],
+}
 
-# إعداد البوت
-tg_app = Application.builder().token(TOKEN).defaults(Defaults(parse_mode="HTML")).build()
-
-# أمر /start
+# الوظائف الأساسية
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📚 الفصل السابع", callback_data="السابع")],
@@ -31,59 +51,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("📖 اختر الفصل الدراسي:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# التعامل مع الأزرار
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
 
-    if data in semesters_paths:
-        folder_path = semesters_paths[data]
-        if os.path.exists(folder_path):
-            subjects = os.listdir(folder_path)
-            buttons = [[InlineKeyboardButton(sub, callback_data=f"{data}|{sub}")] for sub in subjects]
-            await query.edit_message_text(f"📘 مواد الفصل {data}:", reply_markup=InlineKeyboardMarkup(buttons))
-        else:
-            await query.edit_message_text("❌ لم يتم العثور على مجلد الفصل الدراسي.")
+    if data in semesters:
+        buttons = [[InlineKeyboardButton(sub, callback_data=sub)] for sub in semesters[data]]
+        await query.edit_message_text(f"📘 مواد الفصل {data}:", reply_markup=InlineKeyboardMarkup(buttons))
+    elif data in subject_info:
+        await query.edit_message_text(subject_info[data])
+    else:
+        await query.edit_message_text("❌ لا توجد بيانات متاحة.")
 
-    elif "|" in data:
-        semester, subject = data.split("|")
-        folder_path = os.path.join(semesters_paths[semester], subject)
+# إنشاء البوت وتطبيق FastAPI
+app = FastAPI()
+bot_app = ApplicationBuilder().token(TOKEN).build()
 
-        if os.path.exists(folder_path):
-            files = os.listdir(folder_path)
-            if not files:
-                await query.edit_message_text(f"📂 لا توجد ملفات للمادة {subject}.")
-                return
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(button_handler))
 
-            await query.edit_message_text(f"📤 يتم إرسال ملفات مادة {subject} الآن...")
-
-            for filename in files:
-                file_path = os.path.join(folder_path, filename)
-                try:
-                    with open(file_path, "rb") as file:
-                        await context.bot.send_document(chat_id=query.message.chat_id, document=InputFile(file), caption=filename)
-                except Exception as e:
-                    print(f"❌ فشل إرسال {filename}: {e}")
-                    await context.bot.send_message(chat_id=query.message.chat_id, text=f"⚠️ تعذر إرسال الملف: {filename}")
-        else:
-            await query.edit_message_text("❌ لم يتم العثور على مجلد المادة.")
-
-# تسجيل المعالجات
-tg_app.add_handler(CommandHandler("start", start))
-tg_app.add_handler(CallbackQueryHandler(button_handler))
-
-# نقطة استقبال Webhook من Telegram
-@app.post(f"/{TOKEN}")
+@app.post(WEBHOOK_PATH)
 async def telegram_webhook(req: Request):
     data = await req.json()
-    update = Update.de_json(data, tg_app.bot)
-    await tg_app.update_queue.put(update)
-    return "OK"
+    await bot_app.update_queue.put(Update.de_json(data, bot_app.bot))
+    return {"ok": True}
 
-# إعداد Webhook عند التشغيل
 @app.on_event("startup")
 async def on_startup():
-    await tg_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
-    asyncio.create_task(tg_app.initialize())  # بدء البوت
+    await bot_app.bot.set_webhook(WEBHOOK_URL)
+    print("✅ Webhook set!")
 
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
